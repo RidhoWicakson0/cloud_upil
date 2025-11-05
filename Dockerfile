@@ -1,38 +1,38 @@
-# Gunakan image PHP dengan ekstensi yang diperlukan
+# Stage 1: Build frontend
+FROM node:18 AS build-frontend
+WORKDIR /app
+COPY package*.json vite.config.js ./
+COPY resources ./resources
+RUN npm install
+RUN npm run build
+
+# Stage 2: Setup PHP and Laravel
 FROM php:8.2-fpm
 
-# Install dependensi sistem
+# Install dependencies
 RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    zip \
-    unzip \
-    libpng-dev \
-    libonig-dev \
-    libxml2-dev \
-    libzip-dev \
-    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
+    git unzip zip libpng-dev libonig-dev libxml2-dev libzip-dev curl && \
+    docker-php-ext-install pdo pdo_mysql zip mbstring exif pcntl bcmath gd
 
-# Install Node.js (untuk build Vite)
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs
+# Install Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Set working directory
+# Copy project files
 WORKDIR /var/www/html
-
-# Copy file composer dan install dependensi PHP
-COPY composer.json composer.lock ./
-RUN curl -sS https://getcomposer.org/installer | php
-RUN php composer.phar install --no-dev --optimize-autoloader
-
-# Copy seluruh project
 COPY . .
 
-# Build aset frontend menggunakan Vite
-RUN npm install && npm run build
+# Copy built assets from Node stage
+COPY --from=build-frontend /app/public/build ./public/build
 
-# Pastikan direktori storage dan bootstrap/cache bisa ditulis
-RUN chmod -R 777 storage bootstrap/cache
+# Set permissions
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Jalankan aplikasi Laravel
+# Install PHP dependencies
+RUN composer install --no-dev --optimize-autoloader
+
+# Generate key and cache config
+RUN php artisan key:generate
+RUN php artisan config:cache
+
+EXPOSE 80
 CMD php artisan serve --host=0.0.0.0 --port=80
